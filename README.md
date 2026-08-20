@@ -28,8 +28,8 @@ to the same Chrome or Firefox profile.
 1. Put one private key per line in `private_keys.txt`.
 2. Put the matching proxy on the same line number in `proxy.txt`.
 3. Edit `config.py` to configure the number of independent workers, the random
-   sleep range between accounts handled by each worker, and the permitted browser
-   profiles.
+   sleep ranges between accounts and between user-like requests, and the permitted
+   browser profiles.
 
 ## Run with uv (recommended)
 

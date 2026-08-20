@@ -151,10 +151,25 @@ def sign_login_message(private_key: str, address: str) -> str:
 def validate_runtime_config() -> None:
     if not isinstance(config.THREADS, int) or config.THREADS < 1:
         raise CheckerError("config.THREADS must be an integer greater than zero")
-    if config.SLEEP_MIN_SECONDS < 0 or config.SLEEP_MAX_SECONDS < 0:
-        raise CheckerError("sleep values in config.py cannot be negative")
-    if config.SLEEP_MIN_SECONDS > config.SLEEP_MAX_SECONDS:
-        raise CheckerError("SLEEP_MIN_SECONDS cannot exceed SLEEP_MAX_SECONDS")
+    sleep_ranges = (
+        (
+            "BETWEEN_ACCS",
+            config.SLEEP_MIN_BETWEEN_ACCS_SEC,
+            config.SLEEP_MAX_BETWEEN_ACCS_SEC,
+        ),
+        (
+            "BETWEEN_REQS",
+            config.SLEEP_MIN_BETWEEN_REQS_SEC,
+            config.SLEEP_MAX_BETWEEN_REQS_SEC,
+        ),
+    )
+    for label, minimum, maximum in sleep_ranges:
+        if minimum < 0 or maximum < 0:
+            raise CheckerError(f"SLEEP_{label} values in config.py cannot be negative")
+        if minimum > maximum:
+            raise CheckerError(
+                f"SLEEP_MIN_{label}_SEC cannot exceed SLEEP_MAX_{label}_SEC"
+            )
     if not config.BROWSER_PROFILES:
         raise CheckerError("config.BROWSER_PROFILES cannot be empty")
 
@@ -184,6 +199,15 @@ def navigation_headers(site: str, *, origin: str | None = None, referer: str | N
     if referer:
         headers["Referer"] = referer
     return headers
+
+
+def sleep_between_requests() -> None:
+    delay = random.SystemRandom().uniform(
+        config.SLEEP_MIN_BETWEEN_REQS_SEC,
+        config.SLEEP_MAX_BETWEEN_REQS_SEC,
+    )
+    if delay > 0:
+        time.sleep(delay)
 
 
 def parse_result(html: str, expected_address: str) -> tuple[str, int | None]:
@@ -222,6 +246,7 @@ def check_wallet(
         token = csrf_token(home.text)
         signature = sign_login_message(wallet.private_key, wallet.address)
 
+        sleep_between_requests()
         login = session.post(
             f"{BASE_URL}/auth/wallet",
             data={"_csrf_token": token, "address": wallet.address, "signature": signature},
@@ -237,6 +262,7 @@ def check_wallet(
         current_path = urlsplit(current.url).path
 
         if current_path == "/terms":
+            sleep_between_requests()
             current = session.post(
                 f"{BASE_URL}/terms/accept",
                 data={"_csrf_token": csrf_token(current.text)},
@@ -250,6 +276,7 @@ def check_wallet(
             current_path = urlsplit(current.url).path
 
         if current_path == "/newsletter":
+            sleep_between_requests()
             current = session.post(
                 f"{BASE_URL}/search",
                 data={"_csrf_token": csrf_token(current.text)},
@@ -332,7 +359,8 @@ def run_workers(
                 return
 
             delay = random.SystemRandom().uniform(
-                config.SLEEP_MIN_SECONDS, config.SLEEP_MAX_SECONDS
+                config.SLEEP_MIN_BETWEEN_ACCS_SEC,
+                config.SLEEP_MAX_BETWEEN_ACCS_SEC,
             )
             with print_lock:
                 print(f"[worker {worker_number}] sleeping {delay:.1f}s")
