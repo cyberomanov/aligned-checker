@@ -2,6 +2,13 @@
 
 Checks ALIGN airdrop eligibility through the official Aligned community website.
 
+## Clone the repository
+
+```bash
+git clone https://github.com/cyberomanov/aligned-checker.git
+cd aligned-checker
+```
+
 ## Input
 
 - `private_keys.txt`: one EVM private key per non-empty line, with or without `0x`.
