@@ -11,6 +11,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -162,6 +163,11 @@ def validate_runtime_config() -> None:
             config.SLEEP_MIN_BETWEEN_REQS_SEC,
             config.SLEEP_MAX_BETWEEN_REQS_SEC,
         ),
+        (
+            "BETWEEN_RETRIES",
+            config.SLEEP_MIN_BETWEEN_RETRIES_SEC,
+            config.SLEEP_MAX_BETWEEN_RETRIES_SEC,
+        ),
     )
     for label, minimum, maximum in sleep_ranges:
         if minimum < 0 or maximum < 0:
@@ -172,6 +178,8 @@ def validate_runtime_config() -> None:
             )
     if not config.BROWSER_PROFILES:
         raise CheckerError("config.BROWSER_PROFILES cannot be empty")
+    if not isinstance(config.RETRIES_PER_ACCOUNT, int) or config.RETRIES_PER_ACCOUNT < 0:
+        raise CheckerError("config.RETRIES_PER_ACCOUNT must be a non-negative integer")
 
 
 def generate_browser_identities(count: int) -> list[BrowserIdentity]:
@@ -227,7 +235,7 @@ def parse_result(html: str, expected_address: str) -> tuple[str, int | None]:
     return "eligible", amount
 
 
-def check_wallet(
+def check_wallet_once(
         wallet: WalletInput, timeout: float, identity: BrowserIdentity
 ) -> CheckResult:
     session = requests.Session(
@@ -296,10 +304,34 @@ def check_wallet(
 
         status, amount = parse_result(result_page.text, wallet.address)
         return CheckResult(wallet.index, wallet.address, status, amount, "")
-    except (requests.RequestsError, CheckerError) as exc:
-        return CheckResult(wallet.index, wallet.address, "error", None, str(exc))
     finally:
         session.close()
+
+
+def check_wallet(
+        wallet: WalletInput,
+        timeout: float,
+        identity: BrowserIdentity,
+        on_retry: Callable[[int, int, float, str], None] | None = None,
+) -> CheckResult:
+    """Check one wallet, retrying any failure in its website flow."""
+    for attempt in range(config.RETRIES_PER_ACCOUNT + 1):
+        try:
+            return check_wallet_once(wallet, timeout, identity)
+        except Exception as exc:
+            if attempt == config.RETRIES_PER_ACCOUNT:
+                return CheckResult(wallet.index, wallet.address, "error", None, str(exc))
+
+            delay = random.SystemRandom().uniform(
+                config.SLEEP_MIN_BETWEEN_RETRIES_SEC,
+                config.SLEEP_MAX_BETWEEN_RETRIES_SEC,
+            )
+            if on_retry:
+                on_retry(attempt + 1, config.RETRIES_PER_ACCOUNT, delay, str(exc))
+            if delay > 0:
+                time.sleep(delay)
+
+    raise AssertionError("retry loop terminated unexpectedly")
 
 
 def write_results(path: Path, results: list[CheckResult]) -> None:
@@ -334,7 +366,17 @@ def run_workers(
 
         while True:
             try:
-                result = check_wallet(wallet, timeout, identity)
+                def retry_notice(
+                        retry: int, retry_total: int, delay: float, error: str
+                ) -> None:
+                    with print_lock:
+                        print(
+                            f"[{wallet.index}/{total}] {wallet.address}: "
+                            f"request failed ({error}); retry "
+                            f"{retry}/{retry_total} in {delay:.1f}s"
+                        )
+
+                result = check_wallet(wallet, timeout, identity, retry_notice)
                 with results_lock:
                     results.append(result)
                 with print_lock:

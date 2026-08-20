@@ -29,7 +29,8 @@ to the same Chrome or Firefox profile.
 2. Put the matching proxy on the same line number in `proxy.txt`.
 3. Edit `config.py` to configure the number of independent workers, the random
    sleep ranges between accounts and between user-like requests, and the permitted
-   browser profiles.
+   browser profiles. `RETRIES_PER_ACCOUNT = 3` retries any account-processing
+   failure three times for the same account, using a fresh session each time.
 
 ## Run with uv (recommended)
 
